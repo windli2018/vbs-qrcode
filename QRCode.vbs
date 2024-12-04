@@ -114,30 +114,34 @@ Call Main(WScript.Arguments)
 Public Sub Main(ByVal args)
     If args.Count = 0 Then Exit Sub
 
-    Dim params
-    Set params = GetParams(args)
-    If params Is Nothing Then
+    Dim paramsArray
+    Set paramsArray = GetParams(args)
+    If paramsArray Is Nothing Then
         Call WScript.Quit(-1)
     End If
 
-    If Len(params("data")) = 0 Then
+    If Len(paramsArray.Item(0)("data")) = 0 Then
         Call WScript.Quit(-1)
     End If
+    Dim k, params
+    For Each k In paramsArray
+        Set params = paramsArray.Item(k)
+        Call WScript.Echo("processing " & params("out"))
+        Dim sbls: Set sbls = CreateSymbols(CLng(params("ecr")), MAX_VERSION, False)
+        Call sbls.AppendText(params("data"))
 
-    Dim sbls: Set sbls = CreateSymbols(CLng(params("ecr")), MAX_VERSION, False)
-    Call sbls.AppendText(params("data"))
-
-    Dim sbl: Set sbl = sbls.Item(0)
-    Call sbl.SaveAs2( _
-        params("out"), CLng(params("scale")), CBool(params("monochrome")), _
-        CBool(params("transparent")), params("forecolor"), params("backcolor"))
+        Dim sbl: Set sbl = sbls.Item(0)
+        Call sbl.SaveAs2( _
+            params("out"), CLng(params("scale")), CBool(params("monochrome")), _
+            CBool(params("transparent")), params("forecolor"), params("backcolor"))
+    Next
 
     Call WScript.Quit(0)
 End Sub
 
 Private Function GetParams(ByVal args)
     Dim ks
-    ks = Array("data", "out", "monochrome", "transparent", "forecolor", "backcolor", "ecr", "scale")
+    ks = Array("data", "out", "monochrome", "transparent", "forecolor", "backcolor", "ecr", "scale", "filelength", "maxlength")
 
     Dim params
     Set params = CreateObject("Scripting.Dictionary")
@@ -167,6 +171,8 @@ Private Function GetParams(ByVal args)
     params("monochrome") = False
     params("transparent") = False
     params("ecr") = "M"
+    params("maxlength") = 1400
+    params("filelength") = 0
 
     For Each k In ks
         If args.Named.Exists(k) Then
@@ -238,6 +244,10 @@ Private Function GetParams(ByVal args)
     End Select
     params("ecr") = v
 
+    if params("filelength") <= 0 Then
+        params("filelength") = params("maxlength") * 20
+    End If
+
     Dim ext: ext = fso.GetExtensionName(params("out"))
     Select Case LCase(ext)
         Case "bmp", "svg", "png"
@@ -246,8 +256,44 @@ Private Function GetParams(ByVal args)
             Call WScript.Echo("argument error [out] unsupported file type")
             Exit Function
     End Select
-
-    Set GetParams = params
+    Dim paramsArray
+    Set paramsArray = CreateObject("Scripting.Dictionary")
+    if Len(params("data")) <= params("maxlength") Then
+        Set paramsArray(0) = params
+    Else
+        Dim i
+        Dim length
+        length = Len(params("data"))
+        If length > params("filelength") Then
+            Call WScript.Echo("data is too long (" & length & " > " & params("filelength") & "), truncated to " & params("filelength") & " use /filelength:xxx to increase max file length")
+            length = params("filelength")
+        End If
+        Call WScript.Echo("splitting to " &  (round(length / params("maxlength"))) & " files")
+        Dim index
+        index = 0
+        For i = 1 To length Step params("maxlength")
+            Dim p
+            Set p = CreateObject("Scripting.Dictionary")
+            For Each k In ks
+                p(k) = params(k)
+            Next
+            Dim iStr
+            iStr = "0000" & index
+            iStr = Right(iStr, 5)
+            p("out") =  iStr & "_" &  params("out")
+            Dim stepLength
+            If params("maxlength") > length-i Then
+                stepLength = length - i
+            Else
+                stepLength = params("maxlength")
+            End If
+            p("data") = Mid(params("data"), i, stepLength)
+            Set paramsArray(index) = p
+            index = index + 1
+            'Call WScript.Echo(p("data"))
+        Next
+    End If
+    Set GetParams = paramsArray
 End Function
 
 Public Function CreateSymbols(ByVal ecLevel, ByVal maxVer, ByVal allowStructuredAppend)
